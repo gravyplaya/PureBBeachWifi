@@ -2,7 +2,17 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 ## Getting Started
 
-First, run the development server:
+FIrst setup. 
+
+To get started:
+Copy .env.example to .env and fill in your values
+docker compose up -d to start PostgreSQL + app
+pnpm db:push to create tables, pnpm seed to add default plans
+Upload router/setup.rsc to your MikroTik and import it
+Upload router/login.html to /flash/hotspot/ on the router
+Go to /admin to create plans and manage the system
+
+Then, run the development server:
 
 ```bash
 npm run dev

@@ -1,0 +1,41 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: wifi_portal
+      POSTGRES_USER: wifi
+      POSTGRES_PASSWORD: wifi_password_change_me
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wifi -d wifi_portal"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  portal:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgresql://wifi:wifi_password_change_me@postgres:5432/wifi_portal
+      MIKROTIK_API_URL: https://10.5.50.1
+      MIKROTIK_API_USER: api_user
+      MIKROTIK_API_PASS: change_me
+      STRIPE_SECRET_KEY: sk_test_change_me
+      STRIPE_WEBHOOK_SECRET: whsec_change_me
+      AUTH_JWT_SECRET: change_me_to_a_random_32_char_string
+      ADMIN_EMAIL: geovanni@tavonni.com
+      ADMIN_PASSWORD_HASH: "fcf15bf95a415ce38fe7a7da847c2296dbb21583c66291598d4c4e7c3fb72c93"
+      PORTAL_URL: http://localhost:3000
+      HOTSPOT_LOGIN_URL: http://10.5.50.1/login
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pgdata:
