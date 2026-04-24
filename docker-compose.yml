@@ -21,8 +21,6 @@ services:
     # Port managed by Dokploy - do not expose here
     env_file:
       - .env
-    environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-wifi}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-wifi_portal}
     depends_on:
       postgres:
         condition: service_healthy
