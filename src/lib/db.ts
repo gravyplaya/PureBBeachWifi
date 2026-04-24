@@ -4,6 +4,10 @@ import * as schema from "@/schema";
 
 const connectionString = process.env.DATABASE_URL!;
 
+// Log the actual connection string being used (redacted)
+const redacted = connectionString.replace(/:([^@]+)@/, ":***@");
+console.log("[db] Connecting to:", redacted);
+
 const client = postgres(connectionString, {
   max: 10,
   idle_timeout: 20,
