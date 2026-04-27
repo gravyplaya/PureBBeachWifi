@@ -84,21 +84,29 @@ export default async function SuccessPage({
           <h1 className="text-2xl font-bold text-stone-900 mb-2">
             Payment Successful!
           </h1>
-          <p className="text-stone-500 mb-6">
-            You are being connected to the network...
+          <p className="text-stone-500 mb-8">
+            Your access has been created. Please click below to complete your
+            connection.
           </p>
 
-          <meta httpEquiv="refresh" content={`0;url=${loginUrl.toString()}`} />
+          <meta httpEquiv="refresh" content={`1;url=${loginUrl.toString()}`} />
+
+          <script
+            dangerouslySetInnerHTML={{
+              __html: `setTimeout(function() { window.location.href = "${loginUrl.toString()}"; }, 500);`,
+            }}
+          />
 
           <a
             href={loginUrl.toString()}
-            className="inline-block rounded-lg bg-stone-900 px-6 py-2.5 text-sm font-medium text-white hover:bg-stone-800 transition-colors"
+            className="inline-block w-full rounded-lg bg-stone-900 px-8 py-4 text-lg font-bold text-white hover:bg-stone-800 transition-all shadow-lg active:scale-95"
           >
-            Connect Now
+            Continue to Internet
           </a>
 
           <p className="mt-8 text-xs text-stone-400">
-            Redirecting to: {env.portal.hotspotLoginUrl}
+            If you are not redirected automatically, please click the button
+            above.
           </p>
         </div>
       </main>
