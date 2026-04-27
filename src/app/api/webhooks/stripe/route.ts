@@ -9,18 +9,21 @@ import { nanoid } from "nanoid";
 import Stripe from "stripe";
 
 export async function POST(request: NextRequest) {
+  console.log(">>> STRIPE WEBHOOK START");
   const body = await request.text();
   const signature = (await headers()).get("stripe-signature");
 
   if (!signature) {
+    console.error(">>> WEBHOOK ERROR: Missing signature");
     return NextResponse.json({ error: "Missing signature" }, { status: 400 });
   }
 
   let event: Stripe.Event;
   try {
     event = constructWebhookEvent(body, signature);
+    console.log(`>>> WEBHOOK EVENT: ${event.type}`);
   } catch (err) {
-    console.error("Webhook signature verification failed:", err);
+    console.error(">>> WEBHOOK SIGNATURE ERROR:", err);
     return NextResponse.json({ error: "Invalid signature" }, { status: 400 });
   }
 
@@ -30,6 +33,7 @@ export async function POST(request: NextRequest) {
 
   const session = event.data.object as Stripe.Checkout.Session;
   const { planId, macAddress, durationMinutes } = session.metadata || {};
+  console.log(`>>> PROCESSING SESSION: ${session.id}, planId: ${planId}`);
 
   try {
     const [plan] = await db
@@ -39,7 +43,7 @@ export async function POST(request: NextRequest) {
       .limit(1);
 
     if (!plan) {
-      console.error(`Plan not found: ${planId}`);
+      console.error(`>>> WEBHOOK ERROR: Plan not found: ${planId}`);
       return NextResponse.json({ error: "Plan not found" }, { status: 500 });
     }
 
@@ -68,7 +72,8 @@ export async function POST(request: NextRequest) {
 
     const expiresAt = new Date();
     expiresAt.setMinutes(
-      expiresAt.getMinutes() + (Number(durationMinutes) || plan.durationMinutes),
+      expiresAt.getMinutes() +
+        (Number(durationMinutes) || plan.durationMinutes),
     );
 
     await db.insert(payments).values({
