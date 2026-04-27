@@ -49,11 +49,12 @@ export default async function SuccessPage({
     username: string | null;
     password: string | null;
     status: string;
+    id: number;
   } | null = await db
     .select()
     .from(payments)
     .where(eq(payments.stripeSessionId, sessionId))
-    .then((rows) => rows[0] || null);
+    .then((rows) => (rows[0] as any) || null);
 
   if (!payment || payment.status !== "completed") {
     return (
@@ -66,6 +67,24 @@ export default async function SuccessPage({
           <p className="text-stone-500 mb-6">
             Your payment is being processed. You&apos;ll be connected shortly.
           </p>
+
+          <div className="mt-8 p-4 bg-stone-100 rounded-lg text-left font-mono text-xs text-stone-600 overflow-auto">
+            <p className="font-bold mb-2 text-stone-900 border-b border-stone-200 pb-1">
+              Debug Info:
+            </p>
+            <p>
+              <strong>Session ID:</strong> {sessionId}
+            </p>
+            <p>
+              <strong>DB Record:</strong> {payment ? "Found" : "Not Found"}
+            </p>
+            {payment && (
+              <p>
+                <strong>DB Status:</strong> {payment.status}
+              </p>
+            )}
+          </div>
+
           <meta httpEquiv="refresh" content="5" />
         </div>
       </main>
