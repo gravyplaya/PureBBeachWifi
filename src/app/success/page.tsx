@@ -40,12 +40,16 @@ export default async function SuccessPage({
   }
 
   try {
-    session = await retrieveSession(sessionId) as Stripe.Checkout.Session;
+    session = (await retrieveSession(sessionId)) as Stripe.Checkout.Session;
   } catch {
     notFound();
   }
 
-  const payment: { username: string | null; password: string | null; status: string } | null = await db
+  const payment: {
+    username: string | null;
+    password: string | null;
+    status: string;
+  } | null = await db
     .select()
     .from(payments)
     .where(eq(payments.stripeSessionId, sessionId))
@@ -84,12 +88,7 @@ export default async function SuccessPage({
             You are being connected to the network...
           </p>
 
-          <script
-            suppressHydrationWarning
-            dangerouslySetInnerHTML={{
-              __html: `window.location.href = "${loginUrl.toString()}";`,
-            }}
-          />
+          <meta httpEquiv="refresh" content={`0;url=${loginUrl.toString()}`} />
 
           <a
             href={loginUrl.toString()}
@@ -97,6 +96,10 @@ export default async function SuccessPage({
           >
             Connect Now
           </a>
+
+          <p className="mt-8 text-xs text-stone-400">
+            Redirecting to: {env.portal.hotspotLoginUrl}
+          </p>
         </div>
       </main>
     );
@@ -109,8 +112,8 @@ export default async function SuccessPage({
           Something went wrong
         </h1>
         <p className="text-stone-500 mb-6">
-          Your payment was received but we could not set up your account.
-          Please contact support.
+          Your payment was received but we could not set up your account. Please
+          contact support.
         </p>
         <a
           href="/"
