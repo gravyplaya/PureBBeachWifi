@@ -3,6 +3,7 @@ import { payments } from "@/schema";
 import { eq } from "drizzle-orm";
 import { retrieveSession } from "@/lib/stripe";
 import { env } from "@/lib/env";
+import { fulfillOrder } from "@/lib/payments";
 import { notFound } from "next/navigation";
 import Stripe from "stripe";
 
@@ -16,7 +17,6 @@ export default async function SuccessPage({
   const params = await searchParams;
   const sessionId = params.session_id;
 
-  let session: Stripe.Checkout.Session;
   if (!sessionId) {
     return (
       <main className="flex-1 flex flex-col items-center justify-center px-4 py-12">
@@ -39,23 +39,34 @@ export default async function SuccessPage({
     );
   }
 
+  let session: Stripe.Checkout.Session;
   try {
     session = (await retrieveSession(sessionId)) as Stripe.Checkout.Session;
   } catch {
     notFound();
   }
 
-  const payment: {
-    username: string | null;
-    password: string | null;
-    status: string;
-    id: number;
-  } | null = await db
+  // 1. Check if the payment exists and is completed
+  let payment: any = await db
     .select()
     .from(payments)
     .where(eq(payments.stripeSessionId, sessionId))
-    .then((rows) => (rows[0] as any) || null);
+    .then((rows) => rows[0] || null);
 
+  // 2. FALLBACK: If the webhook hasn't finished, but the session is paid, fulfill it here!
+  if (
+    (!payment || payment.status !== "completed") &&
+    session.payment_status === "paid"
+  ) {
+    console.log(`>>> SuccessPage Fallback: Fulfilling session ${sessionId}`);
+    try {
+      payment = await fulfillOrder(session);
+    } catch (error) {
+      console.error(">>> SuccessPage Fallback Error:", error);
+    }
+  }
+
+  // 3. Still processing (not paid or fulfillOrder failed)
   if (!payment || payment.status !== "completed") {
     return (
       <main className="flex-1 flex flex-col items-center justify-center px-4 py-12">
@@ -76,6 +87,9 @@ export default async function SuccessPage({
               <strong>Session ID:</strong> {sessionId}
             </p>
             <p>
+              <strong>Stripe Status:</strong> {session.payment_status}
+            </p>
+            <p>
               <strong>DB Record:</strong> {payment ? "Found" : "Not Found"}
             </p>
             {payment && (
@@ -91,6 +105,7 @@ export default async function SuccessPage({
     );
   }
 
+  // 4. Success - Show "Continue" button
   if (payment.username && payment.password) {
     const loginUrl = new URL(env.portal.hotspotLoginUrl);
     loginUrl.searchParams.set("username", payment.username);
