@@ -54,6 +54,7 @@ export default async function SuccessPage({
     .then((rows) => rows[0] || null);
 
   // 2. FALLBACK: If the webhook hasn't finished, but the session is paid, fulfill it here!
+  let fallbackError = null;
   if (
     (!payment || payment.status !== "completed") &&
     session.payment_status === "paid"
@@ -61,8 +62,9 @@ export default async function SuccessPage({
     console.log(`>>> SuccessPage Fallback: Fulfilling session ${sessionId}`);
     try {
       payment = await fulfillOrder(session);
-    } catch (error) {
+    } catch (error: any) {
       console.error(">>> SuccessPage Fallback Error:", error);
+      fallbackError = error.message || String(error);
     }
   }
 
@@ -97,6 +99,14 @@ export default async function SuccessPage({
                 <strong>DB Status:</strong> {payment.status}
               </p>
             )}
+            {fallbackError && (
+              <p className="text-red-600 mt-2">
+                <strong>Error:</strong> {fallbackError}
+              </p>
+            )}
+            <p className="mt-2 text-[10px] text-stone-400">
+              <strong>Metadata:</strong> {JSON.stringify(session.metadata)}
+            </p>
           </div>
 
           <meta httpEquiv="refresh" content="5" />
