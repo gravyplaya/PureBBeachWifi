@@ -1,5 +1,14 @@
 import { env } from "./env";
 
+// Tell Node.js to allow self-signed certificates for the MikroTik API
+// This is necessary because MikroTik routers often use auto-generated SSL certs
+if (
+  process.env.NODE_ENV !== "production" ||
+  env.mikrotik.apiUrl.includes("10.5.50.1")
+) {
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+}
+
 interface MikroTikHotspotUser {
   ".id": string;
   name: string;
@@ -26,7 +35,7 @@ interface MikroTikResource {
   version: string;
   "board-name": string;
   "cpu-load": string;
-  "uptime": string;
+  uptime: string;
 }
 
 class MikroTikAPIError extends Error {
@@ -130,9 +139,8 @@ export async function disconnectUser(id: string): Promise<void> {
 }
 
 export async function getSystemResource(): Promise<MikroTikResource> {
-  const resources = await mikrotikRequest<MikroTikResource[]>(
-    "/system/resource",
-  );
+  const resources =
+    await mikrotikRequest<MikroTikResource[]>("/system/resource");
   return resources[0];
 }
 
@@ -145,4 +153,9 @@ export async function testConnection(): Promise<boolean> {
   }
 }
 
-export type { MikroTikHotspotUser, MikroTikActiveUser, MikroTikResource, MikroTikAPIError };
+export type {
+  MikroTikHotspotUser,
+  MikroTikActiveUser,
+  MikroTikResource,
+  MikroTikAPIError,
+};
