@@ -38,23 +38,32 @@ export async function fulfillOrder(session: Stripe.Checkout.Session) {
     throw new Error(`Plan not found: ${planId}`);
   }
 
-  // 3. Create Mikrotik User
+  // 3. Create Mikrotik User (non-blocking — don't fail the order if router is unreachable)
   const username = existingPayment?.username || `user_${nanoid(8)}`;
   const password = existingPayment?.password || nanoid(16);
 
-  // Check if user already exists in Mikrotik to avoid errors
-  const existingMikrotikUser = await getHotspotUser(username);
-  if (!existingMikrotikUser) {
-    await createHotspotUser({
-      username,
-      password,
-      profile: plan.mikrotikProfile,
-      macAddress: macAddress || undefined,
-      limitUptime: durationMinutes
-        ? `${Number(durationMinutes)}m`
-        : `${plan.durationMinutes}m`,
-      comment: `stripe:${session.id}`,
-    });
+  let mikrotikCreated = false;
+  try {
+    const existingMikrotikUser = await getHotspotUser(username);
+    if (!existingMikrotikUser) {
+      await createHotspotUser({
+        username,
+        password,
+        profile: plan.mikrotikProfile,
+        macAddress: macAddress || undefined,
+        limitUptime: durationMinutes
+          ? `${Number(durationMinutes)}m`
+          : `${plan.durationMinutes}m`,
+        comment: `stripe:${session.id}`,
+      });
+    }
+    mikrotikCreated = true;
+  } catch (error) {
+    console.error(
+      `>>> MikroTik: Failed to create hotspot user ${username}:`,
+      error,
+    );
+    // Continue — record the payment so the user isn't stuck; hotspot can be provisioned later
   }
 
   const expiresAt = new Date();
@@ -155,22 +164,32 @@ export async function fulfillPaymentIntent(
     throw new Error(`Plan not found: ${planId}`);
   }
 
-  // 3. Create Mikrotik User
+  // 3. Create Mikrotik User (non-blocking — don't fail the order if router is unreachable)
   const username = existingPayment?.username || `user_${nanoid(8)}`;
   const password = existingPayment?.password || nanoid(16);
 
-  const existingMikrotikUser = await getHotspotUser(username);
-  if (!existingMikrotikUser) {
-    await createHotspotUser({
-      username,
-      password,
-      profile: plan.mikrotikProfile,
-      macAddress: macAddress || undefined,
-      limitUptime: durationMinutes
-        ? `${Number(durationMinutes)}m`
-        : `${plan.durationMinutes}m`,
-      comment: `stripe:pi_${paymentIntent.id}`,
-    });
+  let mikrotikCreated = false;
+  try {
+    const existingMikrotikUser = await getHotspotUser(username);
+    if (!existingMikrotikUser) {
+      await createHotspotUser({
+        username,
+        password,
+        profile: plan.mikrotikProfile,
+        macAddress: macAddress || undefined,
+        limitUptime: durationMinutes
+          ? `${Number(durationMinutes)}m`
+          : `${plan.durationMinutes}m`,
+        comment: `stripe:pi_${paymentIntent.id}`,
+      });
+    }
+    mikrotikCreated = true;
+  } catch (error) {
+    console.error(
+      `>>> MikroTik: Failed to create hotspot user ${username}:`,
+      error,
+    );
+    // Continue — record the payment so the user isn't stuck; hotspot can be provisioned later
   }
 
   const expiresAt = new Date();
