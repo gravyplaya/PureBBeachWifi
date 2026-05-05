@@ -8,7 +8,7 @@ import {
 } from "drizzle-orm/pg-core";
 
 export const plans = pgTable("plans", {
-  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   name: varchar("name", { length: 100 }).notNull(),
   description: text("description"),
   durationMinutes: integer("duration_minutes").notNull(),
@@ -23,7 +23,7 @@ export const plans = pgTable("plans", {
 });
 
 export const payments = pgTable("payments", {
-  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   stripeSessionId: varchar("stripe_session_id", { length: 255 }).notNull(),
   stripePaymentIntentId: varchar("stripe_payment_intent_id", { length: 255 }),
   amountCents: integer("amount_cents").notNull(),
@@ -39,7 +39,7 @@ export const payments = pgTable("payments", {
 });
 
 export const activityLog = pgTable("activity_log", {
-  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   paymentId: integer("payment_id").references(() => payments.id),
   eventType: varchar("event_type", { length: 50 }).notNull(),
   details: text("details"),
