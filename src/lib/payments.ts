@@ -2,12 +2,12 @@ import { db } from "./db";
 import { payments, plans, activityLog } from "../schema";
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
-import { authorizeGuestByMac } from "./unifi";
-import { env } from "./env";
 import Stripe from "stripe";
 
 /**
  * Fulfill an order from a Stripe Checkout Session (legacy flow).
+ * Records the payment as completed. UniFi authorization happens client-side
+ * on the success page (the user's browser can reach the local gateway).
  */
 export async function fulfillOrder(session: Stripe.Checkout.Session) {
   const { planId, macAddress, durationMinutes } = session.metadata || {};
@@ -37,28 +37,10 @@ export async function fulfillOrder(session: Stripe.Checkout.Session) {
     throw new Error(`Plan not found: ${planId}`);
   }
 
-  // 3. Authorize device on UniFi
+  // 3. Generate credentials and compute expiry
   const username = existingPayment?.username || `user_${nanoid(8)}`;
   const password = existingPayment?.password || nanoid(16);
   const duration = Number(durationMinutes) || plan.durationMinutes;
-
-  let unifiAuthorized = false;
-  if (macAddress && env.unifi.apiUrl && env.unifi.apiKey) {
-    try {
-      await authorizeGuestByMac({
-        macAddress,
-        timeLimitMinutes: duration,
-      });
-      unifiAuthorized = true;
-      console.log(`>>> UniFi: Authorized ${macAddress} for ${duration}m`);
-    } catch (error) {
-      console.error(
-        `>>> UniFi: Authorization failed for ${macAddress}:`,
-        error,
-      );
-      // Don't fail the order — record it so we can retry authorization later
-    }
-  }
 
   const expiresAt = new Date();
   expiresAt.setMinutes(expiresAt.getMinutes() + duration);
@@ -93,26 +75,25 @@ export async function fulfillOrder(session: Stripe.Checkout.Session) {
       .returning();
   }
 
-  // 5. Log Activity
+  // 5. Log Activity (UniFi authorization happens client-side)
   await db.insert(activityLog).values({
     paymentId: paymentRecord.id,
-    eventType: unifiAuthorized ? "user_authorized" : "user_created_pending_auth",
+    eventType: "user_created_pending_auth",
     details: JSON.stringify({
       username,
       sessionId: session.id,
       macAddress,
-      unifiAuthorized,
     }),
   });
 
-  console.log(
-    `>>> Fulfill: Success for ${username} (UniFi: ${unifiAuthorized ? "authorized" : "pending"})`,
-  );
+  console.log(`>>> Fulfill: Success for ${username}`);
   return paymentRecord;
 }
 
 /**
  * Fulfill an order from a Stripe PaymentIntent (new embedded flow).
+ * Records the payment as completed. UniFi authorization happens client-side
+ * on the success page (the user's browser can reach the local gateway).
  */
 export async function fulfillPaymentIntent(
   paymentIntent: Stripe.PaymentIntent,
@@ -146,27 +127,10 @@ export async function fulfillPaymentIntent(
     throw new Error(`Plan not found: ${planId}`);
   }
 
-  // 3. Authorize device on UniFi
+  // 3. Generate credentials and compute expiry
   const username = existingPayment?.username || `user_${nanoid(8)}`;
   const password = existingPayment?.password || nanoid(16);
   const duration = Number(durationMinutes) || plan.durationMinutes;
-
-  let unifiAuthorized = false;
-  if (macAddress && env.unifi.apiUrl && env.unifi.apiKey) {
-    try {
-      await authorizeGuestByMac({
-        macAddress,
-        timeLimitMinutes: duration,
-      });
-      unifiAuthorized = true;
-      console.log(`>>> UniFi: Authorized ${macAddress} for ${duration}m`);
-    } catch (error) {
-      console.error(
-        `>>> UniFi: Authorization failed for ${macAddress}:`,
-        error,
-      );
-    }
-  }
 
   const expiresAt = new Date();
   expiresAt.setMinutes(expiresAt.getMinutes() + duration);
@@ -202,20 +166,17 @@ export async function fulfillPaymentIntent(
       .returning();
   }
 
-  // 5. Log Activity
+  // 5. Log Activity (UniFi authorization happens client-side)
   await db.insert(activityLog).values({
     paymentId: paymentRecord.id,
-    eventType: unifiAuthorized ? "user_authorized" : "user_created_pending_auth",
+    eventType: "user_created_pending_auth",
     details: JSON.stringify({
       username,
       paymentIntentId: paymentIntent.id,
       macAddress,
-      unifiAuthorized,
     }),
   });
 
-  console.log(
-    `>>> Fulfill: Success for ${username} (UniFi: ${unifiAuthorized ? "authorized" : "pending"})`,
-  );
+  console.log(`>>> Fulfill: Success for ${username}`);
   return paymentRecord;
 }
