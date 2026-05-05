@@ -1,4 +1,11 @@
-import { pgTable, text, integer, boolean, timestamp, varchar } from "drizzle-orm/pg-core";
+import {
+  pgTable,
+  text,
+  integer,
+  boolean,
+  timestamp,
+  varchar,
+} from "drizzle-orm/pg-core";
 
 export const plans = pgTable("plans", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
@@ -10,19 +17,24 @@ export const plans = pgTable("plans", {
   mikrotikProfile: varchar("mikrotik_profile", { length: 100 }).notNull(),
   rateLimit: varchar("rate_limit", { length: 100 }),
   isActive: boolean("is_active").notNull().default(true),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
 });
 
 export const payments = pgTable("payments", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
-  stripeSessionId: varchar("stripe_session_id", { length: 255 }).notNull().unique(),
+  stripeSessionId: varchar("stripe_session_id", { length: 255 }).notNull(),
+  stripePaymentIntentId: varchar("stripe_payment_intent_id", { length: 255 }),
   amountCents: integer("amount_cents").notNull(),
   planId: integer("plan_id").references(() => plans.id),
   macAddress: varchar("mac_address", { length: 17 }),
   username: varchar("username", { length: 100 }),
   password: varchar("password", { length: 100 }),
   status: varchar("status", { length: 20 }).notNull().default("pending"),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
   expiresAt: timestamp("expires_at", { withTimezone: true }),
 });
 
@@ -31,7 +43,9 @@ export const activityLog = pgTable("activity_log", {
   paymentId: integer("payment_id").references(() => payments.id),
   eventType: varchar("event_type", { length: 50 }).notNull(),
   details: text("details"),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
 });
 
 export type Plan = typeof plans.$inferSelect;

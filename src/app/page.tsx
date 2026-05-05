@@ -8,9 +8,21 @@ export const dynamic = "force-dynamic";
 export default async function HomePage({
   searchParams,
 }: {
-  searchParams: Promise<{ mac?: string; redirect?: string }>;
+  searchParams: Promise<{
+    mac?: string;
+    id?: string;
+    ap?: string;
+    ssid?: string;
+    url?: string;
+    redirect?: string;
+  }>;
 }) {
   const params = await searchParams;
+
+  // UniFi external portal sends the client MAC as "id" parameter
+  // Our portal also supports "mac" parameter
+  const macAddress = params.mac || params.id;
+
   const activePlans = await db
     .select()
     .from(plans)
@@ -29,12 +41,14 @@ export default async function HomePage({
 
         <div className="grid gap-4">
           {activePlans.map((plan) => (
-            <PlanCard key={plan.id} plan={plan} macAddress={params.mac} />
+            <PlanCard key={plan.id} plan={plan} macAddress={macAddress} />
           ))}
         </div>
 
         {activePlans.length === 0 && (
-          <p className="text-stone-400 mt-8">No plans available at this time.</p>
+          <p className="text-stone-400 mt-8">
+            No plans available at this time.
+          </p>
         )}
       </div>
     </main>

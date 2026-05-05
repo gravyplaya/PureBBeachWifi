@@ -79,10 +79,14 @@ export default async function AdminSettingsPage() {
             {[
               "MIKROTIK_API_URL",
               "STRIPE_SECRET_KEY",
+              "STRIPE_PUBLISHABLE_KEY",
               "STRIPE_WEBHOOK_SECRET",
               "DATABASE_URL",
               "PORTAL_URL",
               "HOTSPOT_LOGIN_URL",
+              "UNIFI_API_URL",
+              "UNIFI_API_KEY",
+              "UNIFI_SITE_ID",
             ].map((key) => (
               <div key={key} className="flex items-center gap-2">
                 <span

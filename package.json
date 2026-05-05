@@ -14,6 +14,8 @@
     "seed": "npx tsx seed.ts"
   },
   "dependencies": {
+    "@stripe/react-stripe-js": "^6.3.0",
+    "@stripe/stripe-js": "^9.4.0",
     "dotenv": "^17.4.1",
     "drizzle-orm": "^0.45.2",
     "jose": "^6.2.2",

@@ -10,6 +10,7 @@ export const env = {
   },
   stripe: {
     secretKey: getEnv("STRIPE_SECRET_KEY"),
+    publishableKey: getEnv("STRIPE_PUBLISHABLE_KEY"),
     webhookSecret: getEnv("STRIPE_WEBHOOK_SECRET"),
   },
   database: {
@@ -23,6 +24,11 @@ export const env = {
   portal: {
     url: getEnv("PORTAL_URL") || "http://localhost:3000",
     hotspotLoginUrl: getEnv("HOTSPOT_LOGIN_URL") || "http://10.5.50.1/login",
+  },
+  unifi: {
+    apiUrl: getEnv("UNIFI_API_URL"),
+    apiKey: getEnv("UNIFI_API_KEY"),
+    siteId: getEnv("UNIFI_SITE_ID"),
   },
 } as const;
 

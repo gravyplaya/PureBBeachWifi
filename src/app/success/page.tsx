@@ -1,9 +1,9 @@
 import { db } from "@/lib/db";
 import { payments } from "@/schema";
 import { eq } from "drizzle-orm";
-import { retrieveSession } from "@/lib/stripe";
+import { retrieveSession, retrievePaymentIntent } from "@/lib/stripe";
 import { env } from "@/lib/env";
-import { fulfillOrder } from "@/lib/payments";
+import { fulfillOrder, fulfillPaymentIntent } from "@/lib/payments";
 import { notFound } from "next/navigation";
 import Stripe from "stripe";
 
@@ -12,12 +12,147 @@ export const dynamic = "force-dynamic";
 export default async function SuccessPage({
   searchParams,
 }: {
-  searchParams: Promise<{ session_id?: string }>;
+  searchParams: Promise<{
+    session_id?: string;
+    payment_intent_id?: string;
+  }>;
 }) {
   const params = await searchParams;
   const sessionId = params.session_id;
+  const paymentIntentId = params.payment_intent_id;
 
-  if (!sessionId) {
+  // Determine which flow we're in
+  const isPaymentIntentFlow = !!paymentIntentId;
+
+  // ─── PaymentIntent Flow ───────────────────────────────────────
+  if (isPaymentIntentFlow) {
+    let paymentIntent: Stripe.PaymentIntent;
+    try {
+      paymentIntent = await retrievePaymentIntent(paymentIntentId);
+    } catch {
+      notFound();
+    }
+
+    // Check if the payment exists and is completed
+    let payment: any = await db
+      .select()
+      .from(payments)
+      .where(eq(payments.stripePaymentIntentId, paymentIntentId))
+      .then((rows) => rows[0] || null);
+
+    // Fallback: If the webhook hasn't finished, but the payment intent succeeded, fulfill it here
+    let fallbackError = null;
+    if (
+      (!payment || payment.status !== "completed") &&
+      paymentIntent.status === "succeeded"
+    ) {
+      console.log(
+        `>>> SuccessPage Fallback: Fulfilling PaymentIntent ${paymentIntentId}`,
+      );
+      try {
+        payment = await fulfillPaymentIntent(paymentIntent);
+      } catch (error: any) {
+        console.error(">>> SuccessPage Fallback Error:", error);
+        fallbackError = error.message || String(error);
+      }
+    }
+
+    // Still processing
+    if (!payment || payment.status !== "completed") {
+      return (
+        <main className="flex-1 flex flex-col items-center justify-center px-4 py-12">
+          <div className="max-w-md w-full text-center">
+            <div className="animate-spin w-8 h-8 border-2 border-stone-300 border-t-stone-900 rounded-full mx-auto mb-4" />
+            <h1 className="text-2xl font-bold text-stone-900 mb-2">
+              Processing Payment
+            </h1>
+            <p className="text-stone-500 mb-6">
+              Your payment is being processed. You&apos;ll be connected shortly.
+            </p>
+
+            <div className="mt-8 p-4 bg-stone-100 rounded-lg text-left font-mono text-xs text-stone-600 overflow-auto">
+              <p className="font-bold mb-2 text-stone-900 border-b border-stone-200 pb-1">
+                Debug Info:
+              </p>
+              <p>
+                <strong>PaymentIntent ID:</strong> {paymentIntentId}
+              </p>
+              <p>
+                <strong>Stripe Status:</strong> {paymentIntent.status}
+              </p>
+              <p>
+                <strong>DB Record:</strong> {payment ? "Found" : "Not Found"}
+              </p>
+              {payment && (
+                <p>
+                  <strong>DB Status:</strong> {payment.status}
+                </p>
+              )}
+              {fallbackError && (
+                <p className="text-red-600 mt-2">
+                  <strong>Error:</strong> {fallbackError}
+                </p>
+              )}
+              <p className="mt-2 text-[10px] text-stone-400">
+                <strong>Metadata:</strong>{" "}
+                {JSON.stringify(paymentIntent.metadata)}
+              </p>
+            </div>
+
+            <meta httpEquiv="refresh" content="5" />
+          </div>
+        </main>
+      );
+    }
+
+    // Success — Show "Continue" button
+    if (payment.username && payment.password) {
+      const loginUrl = new URL(env.portal.hotspotLoginUrl);
+      loginUrl.searchParams.set("username", payment.username);
+      loginUrl.searchParams.set("password", payment.password);
+
+      return (
+        <main className="flex-1 flex flex-col items-center justify-center px-4 py-12">
+          <div className="max-w-md w-full text-center">
+            <div className="text-5xl mb-4 text-emerald-500">&#10003;</div>
+            <h1 className="text-2xl font-bold text-stone-900 mb-2">
+              Payment Successful!
+            </h1>
+            <p className="text-stone-500 mb-8">
+              Your access has been created. Please click below to complete your
+              connection.
+            </p>
+
+            <meta
+              httpEquiv="refresh"
+              content={`1;url=${loginUrl.toString()}`}
+            />
+
+            <script
+              dangerouslySetInnerHTML={{
+                __html: `setTimeout(function() { window.location.href = "${loginUrl.toString()}"; }, 500);`,
+              }}
+            />
+
+            <a
+              href={loginUrl.toString()}
+              className="inline-block w-full rounded-lg bg-stone-900 px-8 py-4 text-lg font-bold text-white hover:bg-stone-800 transition-all shadow-lg active:scale-95"
+            >
+              Continue to Internet
+            </a>
+
+            <p className="mt-8 text-xs text-stone-400">
+              If you are not redirected automatically, please click the button
+              above.
+            </p>
+          </div>
+        </main>
+      );
+    }
+  }
+
+  // ─── Checkout Session Flow (legacy) ───────────────────────────
+  if (!sessionId && !paymentIntentId) {
     return (
       <main className="flex-1 flex flex-col items-center justify-center px-4 py-12">
         <div className="max-w-md w-full text-center">
@@ -41,7 +176,7 @@ export default async function SuccessPage({
 
   let session: Stripe.Checkout.Session;
   try {
-    session = (await retrieveSession(sessionId)) as Stripe.Checkout.Session;
+    session = (await retrieveSession(sessionId!)) as Stripe.Checkout.Session;
   } catch {
     notFound();
   }
@@ -50,7 +185,7 @@ export default async function SuccessPage({
   let payment: any = await db
     .select()
     .from(payments)
-    .where(eq(payments.stripeSessionId, sessionId))
+    .where(eq(payments.stripeSessionId, sessionId!))
     .then((rows) => rows[0] || null);
 
   // 2. FALLBACK: If the webhook hasn't finished, but the session is paid, fulfill it here!
