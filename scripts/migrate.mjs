@@ -6,6 +6,7 @@
  * Tracks applied migrations in a _migrations table.
  *
  * This replaces the need for drizzle-kit in the production Docker image.
+ * Handles the case where tables already exist (e.g. from a previous db:push).
  */
 
 import { readdirSync, readFileSync } from "fs";
@@ -34,6 +35,42 @@ async function runMigrations() {
       )
     `;
 
+    // If the _migrations table is empty but the payments table already exists,
+    // it means the database was created with db:push. Mark all existing migration
+    // files as already applied so only new migrations (like adding columns) will run.
+    const existingMigrations = await sql`
+      SELECT count(*)::int as count FROM ${sql(MIGRATIONS_TABLE)}
+    `;
+
+    if (existingMigrations[0].count === 0) {
+      // Check if the core tables already exist
+      const tableCheck = await sql`
+        SELECT table_name FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_name = 'payments'
+      `;
+
+      if (tableCheck.length > 0) {
+        // Tables exist from db:push — mark all current migration files as applied
+        const files = readdirSync(MIGRATIONS_DIR)
+          .filter((f) => f.endsWith(".sql"))
+          .sort();
+
+        for (const file of files) {
+          console.log(
+            `>>> MIGRATE: Marking ${file} as applied (tables already exist from db:push)`,
+          );
+          await sql`
+            INSERT INTO ${sql(MIGRATIONS_TABLE)} (name) VALUES (${file})
+            ON CONFLICT (name) DO NOTHING
+          `;
+        }
+
+        console.log(
+          ">>> MIGRATE: Marked existing migrations as applied (database was created with db:push)",
+        );
+      }
+    }
+
     // Get already applied migrations
     const applied = await sql`
       SELECT name FROM ${sql(MIGRATIONS_TABLE)} ORDER BY id
@@ -50,6 +87,7 @@ async function runMigrations() {
       return;
     }
 
+    let appliedCount = 0;
     for (const file of files) {
       if (appliedNames.has(file)) {
         console.log(`>>> MIGRATE: Already applied: ${file}`);
@@ -76,9 +114,14 @@ async function runMigrations() {
       });
 
       console.log(`>>> MIGRATE: Applied ${file}`);
+      appliedCount++;
     }
 
-    console.log(">>> MIGRATE: All migrations applied");
+    if (appliedCount === 0) {
+      console.log(">>> MIGRATE: All migrations already applied");
+    } else {
+      console.log(`>>> MIGRATE: Applied ${appliedCount} new migration(s)`);
+    }
   } catch (error) {
     console.error(">>> MIGRATE: Error running migrations:", error);
     // Don't exit with error — let the app try to start anyway
