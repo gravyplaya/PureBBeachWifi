@@ -42,7 +42,8 @@ yarn-error.log*
 next-env.d.ts
 
 # database
-drizzle/
+
+# drizzle/ — NOT ignored, migration files must be committed for Docker deploy
 
 # docker
 pgdata/
