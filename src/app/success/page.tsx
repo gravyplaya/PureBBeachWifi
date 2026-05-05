@@ -2,8 +2,10 @@ import { db } from "@/lib/db";
 import { payments } from "@/schema";
 import { eq } from "drizzle-orm";
 import { retrieveSession, retrievePaymentIntent } from "@/lib/stripe";
-import { env } from "@/lib/env";
 import { fulfillOrder, fulfillPaymentIntent } from "@/lib/payments";
+import { authorizeGuestByMac } from "@/lib/unifi";
+import { env } from "@/lib/env";
+import { RetryAuthorizeButton } from "@/components/RetryAuthorizeButton";
 import { notFound } from "next/navigation";
 import Stripe from "stripe";
 
@@ -21,7 +23,6 @@ export default async function SuccessPage({
   const sessionId = params.session_id;
   const paymentIntentId = params.payment_intent_id;
 
-  // Determine which flow we're in
   const isPaymentIntentFlow = !!paymentIntentId;
 
   // ─── PaymentIntent Flow ───────────────────────────────────────
@@ -33,7 +34,6 @@ export default async function SuccessPage({
       notFound();
     }
 
-    // Check if the payment exists and is completed
     let payment: any = await db
       .select()
       .from(payments)
@@ -93,10 +93,6 @@ export default async function SuccessPage({
                   <strong>Error:</strong> {fallbackError}
                 </p>
               )}
-              <p className="mt-2 text-[10px] text-stone-400">
-                <strong>Metadata:</strong>{" "}
-                {JSON.stringify(paymentIntent.metadata)}
-              </p>
             </div>
 
             <meta httpEquiv="refresh" content="5" />
@@ -105,50 +101,43 @@ export default async function SuccessPage({
       );
     }
 
-    // Success — Show "Continue" button
-    if (payment.username && payment.password) {
-      const loginUrl = new URL(env.portal.hotspotLoginUrl);
-      loginUrl.searchParams.set("username", payment.username);
-      loginUrl.searchParams.set("password", payment.password);
+    // Payment completed — authorize on UniFi and show success
+    const macAddress = payment.macAddress || paymentIntent.metadata?.macAddress;
+    let unifiAuthorized = false;
+    let unifiError: string | null = null;
 
-      return (
-        <main className="flex-1 flex flex-col items-center justify-center px-4 py-12">
-          <div className="max-w-md w-full text-center">
-            <div className="text-5xl mb-4 text-emerald-500">&#10003;</div>
-            <h1 className="text-2xl font-bold text-stone-900 mb-2">
-              Payment Successful!
-            </h1>
-            <p className="text-stone-500 mb-8">
-              Your access has been created. Please click below to complete your
-              connection.
-            </p>
-
-            <meta
-              httpEquiv="refresh"
-              content={`1;url=${loginUrl.toString()}`}
-            />
-
-            <script
-              dangerouslySetInnerHTML={{
-                __html: `setTimeout(function() { window.location.href = "${loginUrl.toString()}"; }, 500);`,
-              }}
-            />
-
-            <a
-              href={loginUrl.toString()}
-              className="inline-block w-full rounded-lg bg-stone-900 px-8 py-4 text-lg font-bold text-white hover:bg-stone-800 transition-all shadow-lg active:scale-95"
-            >
-              Continue to Internet
-            </a>
-
-            <p className="mt-8 text-xs text-stone-400">
-              If you are not redirected automatically, please click the button
-              above.
-            </p>
-          </div>
-        </main>
-      );
+    if (macAddress && env.unifi.apiUrl && env.unifi.apiKey) {
+      try {
+        const durationMinutes = payment.expiresAt
+          ? Math.max(
+              1,
+              Math.round(
+                (new Date(payment.expiresAt).getTime() - Date.now()) / 60000,
+              ),
+            )
+          : undefined;
+        await authorizeGuestByMac({
+          macAddress,
+          timeLimitMinutes: durationMinutes,
+        });
+        unifiAuthorized = true;
+      } catch (error: any) {
+        unifiError = error.message || String(error);
+        console.error(
+          `>>> UniFi authorization failed for ${macAddress}:`,
+          error,
+        );
+      }
     }
+
+    return (
+      <SuccessView
+        unifiAuthorized={unifiAuthorized}
+        unifiError={unifiError}
+        macAddress={macAddress}
+        paymentIntentId={paymentIntentId}
+      />
+    );
   }
 
   // ─── Checkout Session Flow (legacy) ───────────────────────────
@@ -156,7 +145,6 @@ export default async function SuccessPage({
     return (
       <main className="flex-1 flex flex-col items-center justify-center px-4 py-12">
         <div className="max-w-md w-full text-center">
-          <div className="text-4xl mb-4">&#10003;</div>
           <h1 className="text-2xl font-bold text-stone-900 mb-2">
             No session found
           </h1>
@@ -181,14 +169,12 @@ export default async function SuccessPage({
     notFound();
   }
 
-  // 1. Check if the payment exists and is completed
   let payment: any = await db
     .select()
     .from(payments)
     .where(eq(payments.stripeSessionId, sessionId!))
     .then((rows) => rows[0] || null);
 
-  // 2. FALLBACK: If the webhook hasn't finished, but the session is paid, fulfill it here!
   let fallbackError = null;
   if (
     (!payment || payment.status !== "completed") &&
@@ -203,7 +189,6 @@ export default async function SuccessPage({
     }
   }
 
-  // 3. Still processing (not paid or fulfillOrder failed)
   if (!payment || payment.status !== "completed") {
     return (
       <main className="flex-1 flex flex-col items-center justify-center px-4 py-12">
@@ -215,100 +200,130 @@ export default async function SuccessPage({
           <p className="text-stone-500 mb-6">
             Your payment is being processed. You&apos;ll be connected shortly.
           </p>
-
-          <div className="mt-8 p-4 bg-stone-100 rounded-lg text-left font-mono text-xs text-stone-600 overflow-auto">
-            <p className="font-bold mb-2 text-stone-900 border-b border-stone-200 pb-1">
-              Debug Info:
-            </p>
-            <p>
-              <strong>Session ID:</strong> {sessionId}
-            </p>
-            <p>
-              <strong>Stripe Status:</strong> {session.payment_status}
-            </p>
-            <p>
-              <strong>DB Record:</strong> {payment ? "Found" : "Not Found"}
-            </p>
-            {payment && (
-              <p>
-                <strong>DB Status:</strong> {payment.status}
-              </p>
-            )}
-            {fallbackError && (
-              <p className="text-red-600 mt-2">
-                <strong>Error:</strong> {fallbackError}
-              </p>
-            )}
-            <p className="mt-2 text-[10px] text-stone-400">
-              <strong>Metadata:</strong> {JSON.stringify(session.metadata)}
-            </p>
-          </div>
-
           <meta httpEquiv="refresh" content="5" />
         </div>
       </main>
     );
   }
 
-  // 4. Success - Show "Continue" button
-  if (payment.username && payment.password) {
-    const loginUrl = new URL(env.portal.hotspotLoginUrl);
-    loginUrl.searchParams.set("username", payment.username);
-    loginUrl.searchParams.set("password", payment.password);
+  // Legacy session flow — authorize on UniFi and show success
+  const macAddress = payment.macAddress || session.metadata?.macAddress;
+  let unifiAuthorized = false;
+  let unifiError: string | null = null;
 
-    return (
-      <main className="flex-1 flex flex-col items-center justify-center px-4 py-12">
-        <div className="max-w-md w-full text-center">
-          <div className="text-5xl mb-4 text-emerald-500">&#10003;</div>
-          <h1 className="text-2xl font-bold text-stone-900 mb-2">
-            Payment Successful!
-          </h1>
-          <p className="text-stone-500 mb-8">
-            Your access has been created. Please click below to complete your
-            connection.
-          </p>
-
-          <meta httpEquiv="refresh" content={`1;url=${loginUrl.toString()}`} />
-
-          <script
-            dangerouslySetInnerHTML={{
-              __html: `setTimeout(function() { window.location.href = "${loginUrl.toString()}"; }, 500);`,
-            }}
-          />
-
-          <a
-            href={loginUrl.toString()}
-            className="inline-block w-full rounded-lg bg-stone-900 px-8 py-4 text-lg font-bold text-white hover:bg-stone-800 transition-all shadow-lg active:scale-95"
-          >
-            Continue to Internet
-          </a>
-
-          <p className="mt-8 text-xs text-stone-400">
-            If you are not redirected automatically, please click the button
-            above.
-          </p>
-        </div>
-      </main>
-    );
+  if (macAddress && env.unifi.apiUrl && env.unifi.apiKey) {
+    try {
+      const durationMinutes = payment.expiresAt
+        ? Math.max(
+            1,
+            Math.round(
+              (new Date(payment.expiresAt).getTime() - Date.now()) / 60000,
+            ),
+          )
+        : undefined;
+      await authorizeGuestByMac({
+        macAddress,
+        timeLimitMinutes: durationMinutes,
+      });
+      unifiAuthorized = true;
+    } catch (error: any) {
+      unifiError = error.message || String(error);
+    }
   }
 
   return (
+    <SuccessView
+      unifiAuthorized={unifiAuthorized}
+      unifiError={unifiError}
+      macAddress={macAddress}
+    />
+  );
+}
+
+/**
+ * Shared success view for both PaymentIntent and Session flows.
+ */
+function SuccessView({
+  unifiAuthorized,
+  unifiError,
+  macAddress,
+  paymentIntentId,
+}: {
+  unifiAuthorized: boolean;
+  unifiError: string | null;
+  macAddress?: string | null;
+  paymentIntentId?: string;
+}) {
+  return (
     <main className="flex-1 flex flex-col items-center justify-center px-4 py-12">
       <div className="max-w-md w-full text-center">
-        <h1 className="text-2xl font-bold text-stone-900 mb-2">
-          Something went wrong
-        </h1>
-        <p className="text-stone-500 mb-6">
-          Your payment was received but we could not set up your account. Please
-          contact support.
+        {unifiAuthorized ? (
+          <>
+            <div className="text-5xl mb-4 text-emerald-500">&#10003;</div>
+            <h1 className="text-2xl font-bold text-stone-900 mb-2">
+              You&apos;re Connected!
+            </h1>
+            <p className="text-stone-500 mb-8">
+              Your device has been authorized on the network. You should have
+              internet access now.
+            </p>
+            <a
+              href="http://captive.apple.com"
+              className="inline-block w-full rounded-lg bg-stone-900 px-8 py-4 text-lg font-bold text-white hover:bg-stone-800 transition-all shadow-lg active:scale-95"
+            >
+              Continue to Internet
+            </a>
+          </>
+        ) : (
+          <>
+            <div className="text-5xl mb-4 text-amber-500">&#9888;</div>
+            <h1 className="text-2xl font-bold text-stone-900 mb-2">
+              Payment Successful
+            </h1>
+            <p className="text-stone-500 mb-6">
+              Your payment was processed, but we could not automatically connect
+              your device to the network.
+            </p>
+
+            {macAddress ? (
+              <p className="text-sm text-stone-400 mb-6">
+                Device MAC: {macAddress}
+              </p>
+            ) : (
+              <p className="text-sm text-stone-400 mb-6">
+                No device MAC address was provided with this purchase.
+              </p>
+            )}
+
+            {unifiError && (
+              <p className="text-xs text-red-500 mb-4">
+                Error: {unifiError}
+              </p>
+            )}
+
+            {paymentIntentId && (
+              <RetryAuthorizeButton
+                macAddress={macAddress}
+                paymentIntentId={paymentIntentId}
+              />
+            )}
+
+            <a
+              href="/"
+              className="mt-4 inline-block text-sm text-stone-400 hover:text-stone-600 transition-colors"
+            >
+              Back to Plans
+            </a>
+          </>
+        )}
+
+        <p className="mt-8 text-xs text-stone-400">
+          If you&apos;re still seeing a captive portal page, try refreshing or
+          opening a new browser tab.
         </p>
-        <a
-          href="/"
-          className="inline-block rounded-lg bg-stone-900 px-6 py-2.5 text-sm font-medium text-white hover:bg-stone-800 transition-colors"
-        >
-          Back to Plans
-        </a>
       </div>
     </main>
   );
 }
+
+

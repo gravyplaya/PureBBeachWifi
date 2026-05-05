@@ -2,7 +2,6 @@ import { db } from "./db";
 import { payments, plans, activityLog } from "../schema";
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
-import { createHotspotUser, getHotspotUser } from "./mikrotik";
 import { authorizeGuestByMac } from "./unifi";
 import { env } from "./env";
 import Stripe from "stripe";
@@ -38,38 +37,31 @@ export async function fulfillOrder(session: Stripe.Checkout.Session) {
     throw new Error(`Plan not found: ${planId}`);
   }
 
-  // 3. Create Mikrotik User (non-blocking — don't fail the order if router is unreachable)
+  // 3. Authorize device on UniFi
   const username = existingPayment?.username || `user_${nanoid(8)}`;
   const password = existingPayment?.password || nanoid(16);
+  const duration = Number(durationMinutes) || plan.durationMinutes;
 
-  let mikrotikCreated = false;
-  try {
-    const existingMikrotikUser = await getHotspotUser(username);
-    if (!existingMikrotikUser) {
-      await createHotspotUser({
-        username,
-        password,
-        profile: plan.mikrotikProfile,
-        macAddress: macAddress || undefined,
-        limitUptime: durationMinutes
-          ? `${Number(durationMinutes)}m`
-          : `${plan.durationMinutes}m`,
-        comment: `stripe:${session.id}`,
+  let unifiAuthorized = false;
+  if (macAddress && env.unifi.apiUrl && env.unifi.apiKey) {
+    try {
+      await authorizeGuestByMac({
+        macAddress,
+        timeLimitMinutes: duration,
       });
+      unifiAuthorized = true;
+      console.log(`>>> UniFi: Authorized ${macAddress} for ${duration}m`);
+    } catch (error) {
+      console.error(
+        `>>> UniFi: Authorization failed for ${macAddress}:`,
+        error,
+      );
+      // Don't fail the order — record it so we can retry authorization later
     }
-    mikrotikCreated = true;
-  } catch (error) {
-    console.error(
-      `>>> MikroTik: Failed to create hotspot user ${username}:`,
-      error,
-    );
-    // Continue — record the payment so the user isn't stuck; hotspot can be provisioned later
   }
 
   const expiresAt = new Date();
-  expiresAt.setMinutes(
-    expiresAt.getMinutes() + (Number(durationMinutes) || plan.durationMinutes),
-  );
+  expiresAt.setMinutes(expiresAt.getMinutes() + duration);
 
   // 4. Update or Insert Database Record
   let paymentRecord;
@@ -101,31 +93,21 @@ export async function fulfillOrder(session: Stripe.Checkout.Session) {
       .returning();
   }
 
-  // 5. Authorize on UniFi if configured
-  if (macAddress && env.unifi.apiUrl && env.unifi.apiKey) {
-    try {
-      await authorizeGuestByMac({
-        macAddress,
-        timeLimitMinutes: Number(durationMinutes) || plan.durationMinutes,
-      });
-      console.log(`>>> UniFi: Authorized ${macAddress}`);
-    } catch (error) {
-      console.error(
-        `>>> UniFi: Authorization failed for ${macAddress}:`,
-        error,
-      );
-      // Don't fail the whole order — MikroTik auth may still work
-    }
-  }
-
-  // 6. Log Activity
+  // 5. Log Activity
   await db.insert(activityLog).values({
     paymentId: paymentRecord.id,
-    eventType: "user_created",
-    details: JSON.stringify({ username, sessionId: session.id }),
+    eventType: unifiAuthorized ? "user_authorized" : "user_created_pending_auth",
+    details: JSON.stringify({
+      username,
+      sessionId: session.id,
+      macAddress,
+      unifiAuthorized,
+    }),
   });
 
-  console.log(`>>> Fulfill: Success for ${username}`);
+  console.log(
+    `>>> Fulfill: Success for ${username} (UniFi: ${unifiAuthorized ? "authorized" : "pending"})`,
+  );
   return paymentRecord;
 }
 
@@ -164,38 +146,30 @@ export async function fulfillPaymentIntent(
     throw new Error(`Plan not found: ${planId}`);
   }
 
-  // 3. Create Mikrotik User (non-blocking — don't fail the order if router is unreachable)
+  // 3. Authorize device on UniFi
   const username = existingPayment?.username || `user_${nanoid(8)}`;
   const password = existingPayment?.password || nanoid(16);
+  const duration = Number(durationMinutes) || plan.durationMinutes;
 
-  let mikrotikCreated = false;
-  try {
-    const existingMikrotikUser = await getHotspotUser(username);
-    if (!existingMikrotikUser) {
-      await createHotspotUser({
-        username,
-        password,
-        profile: plan.mikrotikProfile,
-        macAddress: macAddress || undefined,
-        limitUptime: durationMinutes
-          ? `${Number(durationMinutes)}m`
-          : `${plan.durationMinutes}m`,
-        comment: `stripe:pi_${paymentIntent.id}`,
+  let unifiAuthorized = false;
+  if (macAddress && env.unifi.apiUrl && env.unifi.apiKey) {
+    try {
+      await authorizeGuestByMac({
+        macAddress,
+        timeLimitMinutes: duration,
       });
+      unifiAuthorized = true;
+      console.log(`>>> UniFi: Authorized ${macAddress} for ${duration}m`);
+    } catch (error) {
+      console.error(
+        `>>> UniFi: Authorization failed for ${macAddress}:`,
+        error,
+      );
     }
-    mikrotikCreated = true;
-  } catch (error) {
-    console.error(
-      `>>> MikroTik: Failed to create hotspot user ${username}:`,
-      error,
-    );
-    // Continue — record the payment so the user isn't stuck; hotspot can be provisioned later
   }
 
   const expiresAt = new Date();
-  expiresAt.setMinutes(
-    expiresAt.getMinutes() + (Number(durationMinutes) || plan.durationMinutes),
-  );
+  expiresAt.setMinutes(expiresAt.getMinutes() + duration);
 
   // 4. Update or Insert Database Record
   let paymentRecord;
@@ -228,30 +202,20 @@ export async function fulfillPaymentIntent(
       .returning();
   }
 
-  // 5. Authorize on UniFi if configured
-  if (macAddress && env.unifi.apiUrl && env.unifi.apiKey) {
-    try {
-      await authorizeGuestByMac({
-        macAddress,
-        timeLimitMinutes: Number(durationMinutes) || plan.durationMinutes,
-      });
-      console.log(`>>> UniFi: Authorized ${macAddress}`);
-    } catch (error) {
-      console.error(
-        `>>> UniFi: Authorization failed for ${macAddress}:`,
-        error,
-      );
-      // Don't fail the whole order — MikroTik auth may still work
-    }
-  }
-
-  // 6. Log Activity
+  // 5. Log Activity
   await db.insert(activityLog).values({
     paymentId: paymentRecord.id,
-    eventType: "user_created",
-    details: JSON.stringify({ username, paymentIntentId: paymentIntent.id }),
+    eventType: unifiAuthorized ? "user_authorized" : "user_created_pending_auth",
+    details: JSON.stringify({
+      username,
+      paymentIntentId: paymentIntent.id,
+      macAddress,
+      unifiAuthorized,
+    }),
   });
 
-  console.log(`>>> Fulfill: Success for ${username}`);
+  console.log(
+    `>>> Fulfill: Success for ${username} (UniFi: ${unifiAuthorized ? "authorized" : "pending"})`,
+  );
   return paymentRecord;
 }
