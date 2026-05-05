@@ -48,7 +48,7 @@ async function unifiRequest<T>(
   const response = await fetch(url, {
     ...options,
     headers: {
-      "X-API-Key": apiKey,
+      "X-API-KEY": apiKey,
       "Content-Type": "application/json",
       ...options.headers,
     },
@@ -72,7 +72,7 @@ async function unifiRequest<T>(
  * Get all sites managed by this UniFi Network Application.
  */
 export async function getSites(): Promise<UniFiSite[]> {
-  return unifiRequest<UniFiSite[]>("/v1/sites");
+  return unifiRequest<UniFiSite[]>("/integration/v1/sites");
 }
 
 /**
@@ -82,7 +82,7 @@ export async function getClients(
   siteId: string,
   macAddress?: string,
 ): Promise<UniFiClient[]> {
-  let path = `/v1/sites/${siteId}/clients`;
+    let path = `/integration/v1/sites/${siteId}/clients`;
   if (macAddress) {
     path += `?filter=macAddress.eq('${macAddress}')`;
   }
@@ -137,7 +137,7 @@ export async function authorizeGuest(params: {
   }
 
   await unifiRequest(
-    `/v1/sites/${siteId}/clients/${params.clientId}/actions`,
+    `/integration/v1/sites/${siteId}/clients/${params.clientId}/actions`,
     {
       method: "POST",
       body: JSON.stringify(body),
