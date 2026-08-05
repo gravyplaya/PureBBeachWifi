@@ -25,11 +25,6 @@ export const env = {
     url: getEnv("PORTAL_URL") || "http://localhost:3000",
     hotspotLoginUrl: getEnv("HOTSPOT_LOGIN_URL") || "http://10.5.50.1/login",
   },
-  unifi: {
-    apiUrl: getEnv("UNIFI_API_URL"),
-    apiKey: getEnv("UNIFI_API_KEY"),
-    siteId: getEnv("UNIFI_SITE_ID"),
-  },
 } as const;
 
 export function requireEnv(key: string): string {

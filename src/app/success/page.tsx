@@ -1,10 +1,9 @@
 import { db } from "@/lib/db";
-import { payments } from "@/schema";
+import { payments, activityLog } from "@/schema";
 import { eq } from "drizzle-orm";
 import { retrieveSession, retrievePaymentIntent } from "@/lib/stripe";
 import { fulfillOrder, fulfillPaymentIntent } from "@/lib/payments";
 import { env } from "@/lib/env";
-import { UniFiAuthorizer } from "@/components/UniFiAuthorizer";
 import { notFound } from "next/navigation";
 import Stripe from "stripe";
 
@@ -100,53 +99,13 @@ export default async function SuccessPage({
       );
     }
 
-    // Payment completed — authorize via client-side (user's browser is on the local network)
-    const macAddress = payment.macAddress || paymentIntent.metadata?.macAddress;
-    const durationMinutes = payment.expiresAt
-      ? Math.max(
-          1,
-          Math.round(
-            (new Date(payment.expiresAt).getTime() - Date.now()) / 60000,
-          ),
-        )
-      : null;
-
-    const unifiConfigured = !!(env.unifi.apiUrl && env.unifi.apiKey && env.unifi.siteId);
-
-    if (!unifiConfigured || !macAddress) {
-      return (
-        <main className="flex-1 flex flex-col items-center justify-center px-4 py-12">
-          <div className="max-w-md w-full text-center">
-            <div className="text-5xl mb-4 text-emerald-500">&#10003;</div>
-            <h1 className="text-2xl font-bold text-stone-900 mb-2">
-              Payment Successful!
-            </h1>
-            <p className="text-stone-500 mb-8">
-              Your payment has been processed. {!macAddress ? "No device MAC was provided — please connect to the network manually." : "Your device will be connected shortly."}
-            </p>
-            <a
-              href="/"
-              className="inline-block rounded-lg bg-stone-900 px-6 py-2.5 text-sm font-medium text-white hover:bg-stone-800 transition-colors"
-            >
-              Back to Plans
-            </a>
-          </div>
-        </main>
-      );
-    }
-
+    // Payment completed — check if hotspot user was created
+    const hotspotCreated = await wasHotspotUserCreated(payment.id);
     return (
-      <main className="flex-1 flex flex-col items-center justify-center px-4 py-12">
-        <div className="max-w-md w-full text-center">
-          <UniFiAuthorizer
-            macAddress={macAddress}
-            durationMinutes={durationMinutes}
-            unifiApiUrl={env.unifi.apiUrl!}
-            unifiApiKey={env.unifi.apiKey!}
-            unifiSiteId={env.unifi.siteId!}
-          />
-        </div>
-      </main>
+      <MikroTikLoginResult
+        payment={payment}
+        hotspotCreated={hotspotCreated}
+      />
     );
   }
 
@@ -216,20 +175,48 @@ export default async function SuccessPage({
     );
   }
 
-  // Legacy session flow — authorize via client-side
-  const macAddress = payment.macAddress || session.metadata?.macAddress;
-  const durationMinutes = payment.expiresAt
-    ? Math.max(
-        1,
-        Math.round(
-          (new Date(payment.expiresAt).getTime() - Date.now()) / 60000,
-        ),
-      )
-    : null;
+  const hotspotCreated = await wasHotspotUserCreated(payment.id);
+  return (
+    <MikroTikLoginResult
+      payment={payment}
+      hotspotCreated={hotspotCreated}
+    />
+  );
+}
 
-  const unifiConfigured = !!(env.unifi.apiUrl && env.unifi.apiKey && env.unifi.siteId);
+/**
+ * Check the activity log to see if the hotspot user was successfully created.
+ */
+async function wasHotspotUserCreated(paymentId: number): Promise<boolean> {
+  const logs = await db
+    .select()
+    .from(activityLog)
+    .where(eq(activityLog.paymentId, paymentId))
+    .limit(50);
 
-  if (!unifiConfigured || !macAddress) {
+  return logs.some(
+    (log) => log.eventType === "hotspot_user_created",
+  );
+}
+
+/**
+ * Server component that renders the success page with auto-login to MikroTik.
+ * If the hotspot user was created successfully, it auto-redirects to the
+ * MikroTik login URL with the credentials. Otherwise, shows manual instructions.
+ */
+function MikroTikLoginResult({
+  payment,
+  hotspotCreated,
+}: {
+  payment: any;
+  hotspotCreated: boolean;
+}) {
+  const hotspotLoginUrl = env.portal.hotspotLoginUrl;
+
+  // Build the auto-login URL with credentials
+  const autoLoginUrl = `${hotspotLoginUrl}?username=${encodeURIComponent(payment.username)}&password=${encodeURIComponent(payment.password)}`;
+
+  if (hotspotCreated) {
     return (
       <main className="flex-1 flex flex-col items-center justify-center px-4 py-12">
         <div className="max-w-md w-full text-center">
@@ -237,30 +224,84 @@ export default async function SuccessPage({
           <h1 className="text-2xl font-bold text-stone-900 mb-2">
             Payment Successful!
           </h1>
-          <p className="text-stone-500 mb-8">
-            Your payment has been processed.
+          <p className="text-stone-500 mb-6">
+            Your WiFi access is ready. Connecting you to the network...
           </p>
+
+          {/* Auto-redirect to MikroTik login */}
+          <meta httpEquiv="refresh" content={`2;url=${autoLoginUrl}`} />
+          <noscript>
+            <a
+              href={autoLoginUrl}
+              className="inline-block w-full rounded-lg bg-stone-900 px-8 py-4 text-lg font-bold text-white hover:bg-stone-800 transition-all shadow-lg active:scale-95"
+            >
+              Connect to WiFi
+            </a>
+          </noscript>
+
+          <script dangerouslySetInnerHTML={{ __html: `
+            window.location.replace('${autoLoginUrl}');
+          ` }} />
+
+          <div className="mt-8 p-4 bg-stone-100 rounded-lg text-left text-xs text-stone-500">
+            <p className="font-medium text-stone-700 mb-1">
+              If you are not redirected automatically:
+            </p>
+            <ol className="list-decimal list-inside space-y-1">
+              <li>Tap the button below to log in</li>
+              <li>Your access will expire at {new Date(payment.expiresAt).toLocaleString()}</li>
+            </ol>
+          </div>
+
           <a
-            href="/"
-            className="inline-block rounded-lg bg-stone-900 px-6 py-2.5 text-sm font-medium text-white hover:bg-stone-800 transition-colors"
+            href={autoLoginUrl}
+            className="mt-4 inline-block w-full rounded-lg bg-stone-900 px-8 py-4 text-lg font-bold text-white hover:bg-stone-800 transition-all shadow-lg active:scale-95"
           >
-            Back to Plans
+            Connect to WiFi
           </a>
         </div>
       </main>
     );
   }
 
+  // Hotspot user creation failed — show manual login fallback
   return (
     <main className="flex-1 flex flex-col items-center justify-center px-4 py-12">
       <div className="max-w-md w-full text-center">
-        <UniFiAuthorizer
-          macAddress={macAddress}
-          durationMinutes={durationMinutes}
-          unifiApiUrl={env.unifi.apiUrl!}
-          unifiApiKey={env.unifi.apiKey!}
-          unifiSiteId={env.unifi.siteId!}
-        />
+        <div className="text-5xl mb-4 text-amber-500">&#9888;</div>
+        <h1 className="text-2xl font-bold text-stone-900 mb-2">
+          Payment Successful
+        </h1>
+        <p className="text-stone-500 mb-6">
+          Your payment was processed, but we could not automatically provision
+          your device on the network. You can try connecting manually.
+        </p>
+
+        <div className="mt-6 p-4 bg-stone-100 rounded-lg text-left text-sm space-y-2">
+          <p className="font-medium text-stone-700">Manual Login:</p>
+          <p>
+            <span className="text-stone-500">Username:</span>{" "}
+            <span className="font-mono text-stone-900">{payment.username}</span>
+          </p>
+          <p>
+            <span className="text-stone-500">Password:</span>{" "}
+            <span className="font-mono text-stone-900">{payment.password}</span>
+          </p>
+        </div>
+
+        <a
+          href={autoLoginUrl}
+          className="mt-6 inline-block w-full rounded-lg bg-stone-900 px-8 py-4 text-lg font-bold text-white hover:bg-stone-800 transition-all shadow-lg active:scale-95"
+        >
+          Try Auto-Login
+        </a>
+
+        <a
+          href={hotspotLoginUrl}
+          className="mt-4 inline-block text-sm text-stone-400 hover:text-stone-600 transition-colors"
+        >
+          Go to login page
+        </a>
       </div>
     </main>
   );

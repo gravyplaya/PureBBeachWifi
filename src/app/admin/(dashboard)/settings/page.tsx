@@ -84,9 +84,8 @@ export default async function AdminSettingsPage() {
               "DATABASE_URL",
               "PORTAL_URL",
               "HOTSPOT_LOGIN_URL",
-              "UNIFI_API_URL",
-              "UNIFI_API_KEY",
-              "UNIFI_SITE_ID",
+              "MIKROTIK_API_USER",
+              "AUTH_JWT_SECRET",
             ].map((key) => (
               <div key={key} className="flex items-center gap-2">
                 <span
