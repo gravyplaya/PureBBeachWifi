@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import type { Plan } from "@/schema";
 
@@ -10,6 +11,8 @@ interface PlanCardProps {
 
 export function PlanCard({ plan, macAddress }: PlanCardProps) {
   const router = useRouter();
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const price = (plan.priceCents / 100).toFixed(2);
   const mins = plan.durationMinutes;
 
@@ -23,10 +26,33 @@ export function PlanCard({ plan, macAddress }: PlanCardProps) {
 
   const label = formatDuration(mins);
 
-  function handlePurchase() {
-    const params = new URLSearchParams({ planId: String(plan.id) });
-    if (macAddress) params.set("mac", macAddress);
-    router.push(`/checkout?${params.toString()}`);
+  async function handlePurchase() {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const res = await fetch("/api/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          planId: plan.id,
+          macAddress: macAddress || undefined,
+        }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || "Failed to start checkout");
+      }
+
+      const data = await res.json();
+      // Redirect to Stripe's hosted checkout page
+      window.location.href = data.url;
+    } catch (err: any) {
+      console.error("Checkout error:", err);
+      setError(err.message || "Something went wrong. Please try again.");
+      setLoading(false);
+    }
   }
 
   return (
@@ -79,11 +105,25 @@ export function PlanCard({ plan, macAddress }: PlanCardProps) {
         )}
       </div>
 
+      {error && (
+        <div className="mb-3 rounded-lg bg-red-50 border border-red-200 p-2 text-sm text-red-700">
+          {error}
+        </div>
+      )}
+
       <button
         onClick={handlePurchase}
-        className="w-full rounded-lg bg-stone-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-stone-800 transition-colors focus:outline-none focus:ring-2 focus:ring-stone-500 focus:ring-offset-2"
+        disabled={loading}
+        className="w-full rounded-lg bg-stone-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-stone-800 transition-colors focus:outline-none focus:ring-2 focus:ring-stone-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
       >
-        Purchase
+        {loading ? (
+          <span className="flex items-center justify-center gap-2">
+            <span className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full" />
+            Redirecting to checkout...
+          </span>
+        ) : (
+          "Purchase"
+        )}
       </button>
     </div>
   );
